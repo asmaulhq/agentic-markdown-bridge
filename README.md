@@ -1,4 +1,3 @@
-cat > README.md <<'EOF'
 # Agentic Markdown Bridge
 
 Agentic Markdown Bridge makes WordPress content easier for AI agents, LLMs, and machine-readable workflows to consume by exposing clean Markdown representations of public content and providing practical `llms.txt` tools.
