@@ -1,0 +1,120 @@
+.agentic-mb-actions {
+	position: fixed;
+	bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+	z-index: 98;
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.agentic-mb-bottom-center {
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.agentic-mb-bottom-left {
+	left: 24px;
+}
+
+.agentic-mb-bottom-right {
+	right: 24px;
+}
+
+.agentic-mb-actions a,
+.agentic-mb-actions button {
+	appearance: none;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: .45em;
+	box-sizing: border-box;
+	padding: 11px 17px;
+	border: 1px solid rgba(127, 127, 127, .24);
+	font-family: inherit;
+	font-size: 14px;
+	font-weight: 300;
+	line-height: 1.2;
+	text-decoration: none !important;
+	cursor: pointer;
+	box-shadow: 0 4px 14px rgba(0, 0, 0, .14);
+	transition: transform .15s ease, box-shadow .15s ease;
+}
+
+.agentic-mb-shape-pill a,
+.agentic-mb-shape-pill button {
+	border-radius: 999px;
+}
+
+.agentic-mb-shape-rounded a,
+.agentic-mb-shape-rounded button {
+	border-radius: 10px;
+}
+
+.agentic-mb-shape-square a,
+.agentic-mb-shape-square button {
+	border-radius: 0;
+}
+
+.agentic-mb-style-dark a,
+.agentic-mb-style-dark button {
+	background: #111;
+	color: #fff !important;
+}
+
+.agentic-mb-style-light a,
+.agentic-mb-style-light button {
+	background: #fff;
+	color: #111 !important;
+}
+
+.agentic-mb-actions a:hover,
+.agentic-mb-actions button:hover {
+	transform: translateY(-1px);
+	box-shadow: 0 6px 18px rgba(0, 0, 0, .2);
+}
+
+.agentic-mb-actions a:focus-visible,
+.agentic-mb-actions button:focus-visible {
+	outline: 3px solid currentColor;
+	outline-offset: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+	.agentic-mb-style-auto a,
+	.agentic-mb-style-auto button {
+		background: #111;
+		color: #fff !important;
+	}
+}
+
+@media (prefers-color-scheme: light) {
+	.agentic-mb-style-auto a,
+	.agentic-mb-style-auto button {
+		background: #fff;
+		color: #111 !important;
+	}
+}
+
+@media (max-width: 600px) {
+	.agentic-mb-actions {
+		bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+		max-width: calc(100vw - 24px);
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+
+	.agentic-mb-bottom-left {
+		left: 12px;
+	}
+
+	.agentic-mb-bottom-right {
+		right: 12px;
+	}
+
+	.agentic-mb-actions a,
+	.agentic-mb-actions button {
+		padding: 10px 14px;
+		font-size: 13px;
+	}
+}

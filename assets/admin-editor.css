@@ -1,0 +1,33 @@
+/* Keep Agentic Markdown editor controls inside the WordPress editor meta-box area. */
+.edit-post-meta-boxes-area #agentic-markdown-bridge-options > .inside,
+.edit-post-meta-boxes-area #agentic-markdown-bridge-custom > .inside {
+	box-sizing: border-box;
+	min-width: 0;
+	width: auto;
+	max-width: none;
+}
+
+#agentic-markdown-bridge-options p,
+#agentic-markdown-bridge-options label,
+#agentic-markdown-bridge-custom p,
+#agentic-markdown-bridge-custom label {
+	box-sizing: border-box;
+	min-width: 0;
+	max-width: 100%;
+}
+
+#agentic-markdown-bridge-options .agentic-mb-editor-select,
+#agentic-markdown-bridge-custom .agentic-mb-editor-select,
+#agentic-markdown-bridge-custom textarea {
+	box-sizing: border-box;
+	display: block;
+	width: 100%;
+	max-width: 100%;
+	min-width: 0;
+}
+
+#agentic-markdown-bridge-options .description,
+#agentic-markdown-bridge-custom .description,
+#agentic-markdown-bridge-custom #agentic-mb-custom-help {
+	overflow-wrap: anywhere;
+}

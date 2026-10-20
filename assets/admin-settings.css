@@ -1,0 +1,91 @@
+#amb-ai-generator {
+	max-width: 900px;
+	margin-top: 34px;
+	padding-top: 28px;
+	border-top: 1px solid #dcdcde;
+}
+
+#amb-ai-generator h3 {
+	margin: 0 0 10px;
+	font-size: 16px;
+	line-height: 1.4;
+}
+
+#amb-ai-generator .amb-ai-intro,
+#amb-ai-generator .amb-ai-note {
+	max-width: 760px;
+	margin: 0;
+}
+
+#amb-ai-generator .amb-ai-intro {
+	margin-bottom: 20px;
+}
+
+#amb-ai-provider-buttons {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 12px;
+	max-width: 760px;
+	margin: 0 0 18px;
+}
+
+#amb-ai-provider-buttons .amb-ai-provider-card {
+	display: flex;
+	flex-direction: column;
+	gap: 7px;
+	min-width: 0;
+}
+
+#amb-ai-provider-buttons .button {
+	margin: 0;
+	min-height: 40px;
+	width: 100%;
+	padding-left: 16px;
+	padding-right: 16px;
+}
+
+#amb-ai-provider-buttons .amb-ai-provider-help {
+	min-height: 34px;
+	font-size: 12px;
+	line-height: 1.4;
+	color: #646970;
+}
+
+#amb-ai-provider-status {
+	display: block;
+	min-height: 20px;
+	margin: 0 0 16px;
+}
+
+#amb-ai-generator .amb-ai-note {
+	margin-bottom: 22px;
+}
+
+#amb-ai-generator details {
+	max-width: 760px;
+	margin-top: 0;
+	padding-top: 2px;
+}
+
+#amb-ai-generator details summary {
+	cursor: pointer;
+	font-weight: 500;
+}
+
+#amb-ai-generator details[open] summary {
+	margin-bottom: 12px;
+}
+
+#amb-ai-generator #amb-ai-prompt-preview {
+	margin-top: 4px;
+}
+
+.amb-post-type-option {
+	display: block;
+	margin: 0 0 5px;
+}
+
+.amb-generator-posts {
+	width: 100%;
+	max-width: 760px;
+}

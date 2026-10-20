@@ -23,9 +23,7 @@ final class Agentic_Markdown_Converter {
 		}
 
 		if ( ! class_exists( 'DOMDocument' ) ) {
-			$text = wp_strip_all_tags( $html, true );
-			$text = html_entity_decode( $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-			return (string) preg_replace( "/\n{3,}/", "\n\n", trim( $text ) );
+			return self::convert_without_dom( $html );
 		}
 
 		$previous = libxml_use_internal_errors( true );
@@ -106,12 +104,54 @@ final class Agentic_Markdown_Converter {
 
 		$markdown = html_entity_decode( $markdown, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
 		$markdown = str_replace( "\xC2\xA0", ' ', $markdown );
-		$markdown = (string) preg_replace( "/[ \t]+\n/", "\n", $markdown );
-		$markdown = (string) preg_replace( "/\n[ \t]+/", "\n", $markdown );
+		$markdown = (string) preg_replace( "/[ 	]+\n/", "\n", $markdown );
+		$markdown = (string) preg_replace( "/\n[ 	]+/", "\n", $markdown );
 		$markdown = (string) preg_replace( "/\n{3,}/", "\n\n", $markdown );
 		$markdown = (string) preg_replace( '/ {2,}/u', ' ', $markdown );
 
 		return trim( $markdown );
+	}
+
+	/**
+	 * Convert basic document structure when the PHP DOM extension is unavailable.
+	 *
+	 * This intentionally remains conservative, but preserves headings and common
+	 * block boundaries so title detection and pre-H1 controls still behave
+	 * predictably on hosts without DOMDocument.
+	 *
+	 * @param string $html Rendered HTML.
+	 * @return string
+	 */
+	private static function convert_without_dom( $html ) {
+		$html = (string) $html;
+
+		// Remove content that should never appear in machine-readable output.
+		$html = (string) preg_replace( '#<(script|style|noscript|form|button|svg|canvas|template|nav)\\b[^>]*>.*?</\\1\\s*>#is', '', $html );
+
+		// Preserve heading levels before stripping the remaining markup.
+		$html = (string) preg_replace_callback(
+			'#<h([1-6])\\b[^>]*>(.*?)</h\\1\\s*>#is',
+			static function ( $matches ) {
+				$level = absint( $matches[1] );
+				$text  = trim( wp_strip_all_tags( $matches[2], true ) );
+				return $text ? "\n\n" . str_repeat( '#', $level ) . ' ' . $text . "\n\n" : '';
+			},
+			$html
+		);
+
+		// Preserve readable block boundaries and simple list structure.
+		$html = (string) preg_replace( '#<br\\s*/?>#i', "\n", $html );
+		$html = (string) preg_replace( '#<li\\b[^>]*>#i', "\n- ", $html );
+		$html = (string) preg_replace( '#</(?:p|div|section|article|header|footer|aside|blockquote|pre|ul|ol|li|figure|figcaption|details|summary|dl|dt|dd)\\s*>#i', "\n\n", $html );
+
+		$text = wp_strip_all_tags( $html, true );
+		$text = html_entity_decode( $text, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		$text = str_replace( "\xC2\xA0", ' ', $text );
+		$text = (string) preg_replace( "/[ \t]+\n/", "\n", $text );
+		$text = (string) preg_replace( "/\n[ \t]+/", "\n", $text );
+		$text = (string) preg_replace( "/\n{3,}/", "\n\n", $text );
+
+		return trim( $text );
 	}
 
 	/**
@@ -274,7 +314,7 @@ final class Agentic_Markdown_Converter {
 	private static function render_node( DOMNode $node, $base_url = '' ) {
 		if ( XML_TEXT_NODE === $node->nodeType ) {
 			$text = str_replace( "\xC2\xA0", ' ', (string) $node->nodeValue );
-			return (string) preg_replace( '/[\t\r\n ]+/u', ' ', $text );
+			return (string) preg_replace( '/[	\r\n ]+/u', ' ', $text );
 		}
 
 		if ( XML_COMMENT_NODE === $node->nodeType || XML_ELEMENT_NODE !== $node->nodeType ) {
@@ -642,29 +682,95 @@ final class Agentic_Markdown_Converter {
 		return $output ? $output . "\n" : '';
 	}
 
-	/** Make relative URL absolute. */
+	/**
+	 * Make a relative URL absolute while preserving already-absolute URLs.
+	 *
+	 * Some rendered WordPress content can contain a malformed destination where
+	 * an absolute URL has accidentally been prefixed with the current permalink,
+	 * for example: https://example.com/page/https://example.com/services/.
+	 * Repair only that exact base-prefix pattern; do not rewrite legitimate URLs
+	 * that merely contain another URL in a query string or path.
+	 *
+	 * @param string $url      Link or media URL.
+	 * @param string $base_url Current canonical page URL.
+	 * @return string
+	 */
 	private static function absolute_url( $url, $base_url ) {
-		$url = trim( (string) $url );
+		$url = trim( html_entity_decode( (string) $url, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
 		if ( '' === $url ) {
 			return '';
 		}
-		if ( preg_match( '#^(?:[a-z][a-z0-9+.-]*:|//|#)#i', $url ) ) {
+
+		$base_url = $base_url ? trim( (string) $base_url ) : home_url( '/' );
+		$url      = self::repair_prefixed_absolute_url( $url, $base_url );
+
+		// Preserve absolute schemes, anchors, mailto:, tel:, data:, etc.
+		if ( preg_match( '~^(?:[a-z][a-z0-9+.-]*:|//|#)~i', $url ) ) {
 			if ( 0 === strpos( $url, '//' ) ) {
-				$scheme = wp_parse_url( home_url( '/' ), PHP_URL_SCHEME );
+				$scheme = wp_parse_url( $base_url, PHP_URL_SCHEME );
+				if ( ! $scheme ) {
+					$scheme = wp_parse_url( home_url( '/' ), PHP_URL_SCHEME );
+				}
 				return ( $scheme ? $scheme : 'https' ) . ':' . $url;
 			}
 			return $url;
 		}
+
+		// Root-relative URLs should use the current page origin when available.
 		if ( 0 === strpos( $url, '/' ) ) {
-			$home = wp_parse_url( home_url( '/' ) );
-			$base = ( isset( $home['scheme'] ) ? $home['scheme'] : 'https' ) . '://' . ( isset( $home['host'] ) ? $home['host'] : '' );
-			if ( ! empty( $home['port'] ) ) {
-				$base .= ':' . (int) $home['port'];
+			$origin = self::url_origin( $base_url );
+			if ( '' === $origin ) {
+				$origin = self::url_origin( home_url( '/' ) );
 			}
-			return $base . $url;
+			return $origin . $url;
 		}
-		$base_url = $base_url ? $base_url : home_url( '/' );
+
 		return trailingslashit( $base_url ) . ltrim( $url, '/' );
+	}
+
+	/**
+	 * Repair an accidentally duplicated absolute URL after the current permalink.
+	 *
+	 * @param string $url      Candidate URL.
+	 * @param string $base_url Current canonical page URL.
+	 * @return string
+	 */
+	private static function repair_prefixed_absolute_url( $url, $base_url ) {
+		if ( ! preg_match( '#^https?://#i', $url ) || '' === $base_url ) {
+			return $url;
+		}
+
+		$prefix = trailingslashit( $base_url );
+		if ( 0 !== stripos( $url, $prefix ) ) {
+			return $url;
+		}
+
+		$remainder = substr( $url, strlen( $prefix ) );
+		if ( preg_match( '#^https?://#i', $remainder ) ) {
+			return $remainder;
+		}
+
+		return $url;
+	}
+
+	/**
+	 * Return scheme + host + optional port for a URL.
+	 *
+	 * @param string $url URL.
+	 * @return string
+	 */
+	private static function url_origin( $url ) {
+		$parts = wp_parse_url( $url );
+		if ( ! is_array( $parts ) || empty( $parts['host'] ) ) {
+			return '';
+		}
+
+		$origin = ( ! empty( $parts['scheme'] ) ? $parts['scheme'] : 'https' ) . '://' . $parts['host'];
+		if ( ! empty( $parts['port'] ) ) {
+			$origin .= ':' . (int) $parts['port'];
+		}
+
+		return $origin;
 	}
 
 	/** Escape Markdown link text. */

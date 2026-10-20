@@ -28,6 +28,9 @@ function agentic_mb_uninstall_site() {
 	delete_post_meta_by_key( '_agentic_mb_title_mode' );
 	delete_post_meta_by_key( '_agentic_mb_pre_h1_mode' );
 	delete_post_meta_by_key( '_agentic_mb_enabled_mode' );
+	delete_post_meta_by_key( '_agentic_mb_frontend_mode' );
+	delete_post_meta_by_key( '_agentic_mb_copy_mode' );
+	delete_post_meta_by_key( '_agentic_mb_llms_action_mode' );
 	delete_post_meta_by_key( '_agentic_mb_custom_mode' );
 	delete_post_meta_by_key( '_agentic_mb_custom_markdown' );
 	delete_post_meta_by_key( '_agentic_mb_view_count' );

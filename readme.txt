@@ -1,18 +1,20 @@
 === Agentic Markdown Bridge ===
 Contributors: asmaulhq
-Tags: markdown, llms, ai agents, content negotiation, llms.txt
+Tags: markdown, ai agents, machine readable, content negotiation, llms
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.0.0
+Stable tag: 1.0.3
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Clean Markdown representations, llms.txt management, discovery, caching, diagnostics, and content controls for WordPress.
+Expose per-page machine-readable Markdown for WordPress, with discovery, caching, controls, diagnostics, and optional llms.txt management.
 
 == Description ==
 
 Agentic Markdown Bridge gives public WordPress content a clean machine-readable Markdown representation while leaving the normal HTML experience unchanged.
+
+Its primary purpose is a per-page representation layer for WordPress content: posts, pages, and public custom post types can expose their own Markdown endpoint for AI agents, retrieval systems, developer tools, and other machine clients. llms.txt support is optional and complements that per-page layer rather than defining it.
 
 With pretty permalinks:
 
@@ -29,6 +31,10 @@ The HTML page can advertise the representation with:
 The plugin also includes optional llms.txt management, per-content controls, caching, diagnostics, multilingual-aware URLs and response language metadata, local request counters, content negotiation, and developer/CLI tools.
 
 The plugin does not automatically send content or analytics to Bipixels or any third party and does not require an account, API key, SaaS service, or remote code. Optional AI-assisted llms.txt buttons are user-initiated outbound links to third-party AI websites.
+
+= Representation layer, not just llms.txt =
+
+The core feature is a machine-readable representation layer for individual WordPress URLs. Each eligible piece of content can have its own Markdown endpoint, discovery metadata, HTTP validation headers, content-negotiation behavior, exclusions, title rules, and per-content overrides. Optional llms.txt management acts as a site-level resource map on top of that representation layer.
 
 = Core Markdown features =
 
@@ -100,6 +106,7 @@ Optional fixed front-end actions can be enabled for eligible pages:
 * View Markdown.
 * Copy Markdown.
 * View llms.txt.
+* Per-page/post overrides for the fixed action group, Copy Markdown, and View llms.txt.
 * Custom labels.
 * Bottom-left, bottom-center, or bottom-right placement.
 * Dark, light, or automatic color style.
@@ -137,6 +144,10 @@ When WP-CLI is available:
 6. Open Tools > Markdown Diagnostics to verify the installation.
 
 == Frequently Asked Questions ==
+
+= Is this primarily an llms.txt generator? =
+
+No. The primary feature is the per-page Markdown representation layer, including discovery metadata, HTTP caching/validation, content negotiation, and per-content controls. llms.txt management is an optional supporting feature.
 
 = Does this replace my normal WordPress pages? =
 
@@ -199,6 +210,9 @@ These services are third-party services and are governed by their own terms and 
 
 * `agentic_markdown_bridge_allowed_post_types`
 * `agentic_markdown_bridge_is_enabled_for_post`
+* `agentic_markdown_bridge_frontend_actions_enabled`
+* `agentic_markdown_bridge_copy_action_enabled`
+* `agentic_markdown_bridge_llms_action_enabled`
 * `agentic_markdown_bridge_markdown_url`
 * `agentic_markdown_bridge_rendered_html`
 * `agentic_markdown_bridge_include_post_title`
@@ -214,6 +228,30 @@ These services are third-party services and are governed by their own terms and 
 Agentic Markdown Bridge does not contact AI services automatically and does not transmit site data to Bipixels. Optional local counters are stored only in the site's own WordPress database and contain aggregate counts only. If an administrator explicitly uses an AI-assisted llms.txt button, the generated prompt is handled as described in the External Services section above.
 
 == Changelog ==
+
+= 1.0.3 =
+* Kept default front-end action labels translation-free in stored settings and resolve translated fallbacks only when rendering, avoiding early translation loading and locale-specific persisted defaults.
+* Fixed clean activation with `WP_DEBUG` enabled by deferring runtime initialization until WordPress `init` and keeping activation-time defaults translation-free.
+* Fixed the front-end Copy Markdown action so its script binds reliably regardless of footer output order and falls back safely when the Clipboard API is unavailable or denied.
+* Made the Content before first H1 setting apply consistently to both generated and custom Markdown sources, with per-content overrides and cache invalidation preserved.
+* Preserved heading structure in the no-DOM fallback converter so H1 detection and pre-H1 controls continue to work on hosts without the PHP DOM extension.
+* Registered rewrite rules directly during the plugin's `init` callback, preserving endpoint behavior without early translation loading notices.
+
+= 1.0.2 =
+* Hardened the plugin for WordPress.org review with complete nonce, capability, unslash, validation, and sanitization checks for privileged request handling.
+* Moved admin and front-end JavaScript/CSS to WordPress enqueue APIs and limited assets to the screens that need them.
+* Added cache-correct `Vary: Accept` handling for eligible canonical HTML responses when content negotiation is enabled.
+* Prevented Gutenberg editor-sidebar overflow using scoped `border-box` sizing for the plugin meta boxes and responsive controls.
+* Removed remaining inline admin presentation styles and improved diagnostics/status accessibility.
+* Kept Settings API sanitization side-effect free; physical llms.txt synchronization now runs only after sanitized settings are stored.
+* Limited physical llms.txt editing to hosts where WordPress reports direct filesystem access; virtual llms.txt remains available otherwise.
+* Clarified the plugin's primary purpose as per-page machine-readable Markdown, with llms.txt management as an optional supporting feature.
+* Added missing translator comments for plural strings containing placeholders and completed WordPress internationalization cleanup.
+
+= 1.0.1 =
+* Fixed Markdown link conversion so absolute URLs are preserved and accidentally base-prefixed absolute URLs are repaired.
+* Reduced the front-end Markdown action bar stacking level to `z-index: 98` for better compatibility with site headers, dialogs, and overlays.
+* Added per-page/post overrides for fixed front-end actions, Copy Markdown, and the llms.txt action.
 
 = 1.0.0 =
 * Initial public release.

@@ -1,0 +1,21 @@
+.amb-diagnostics-table,
+.amb-live-results {
+	max-width: 1000px;
+}
+
+.amb-diagnostics-status {
+	width: 72px;
+	font-size: 20px;
+	font-weight: 600;
+}
+
+.amb-live-results {
+	box-sizing: border-box;
+	min-height: 48px;
+	margin-top: 12px;
+	padding: 14px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	background: #fff;
+	border: 1px solid #ccd0d4;
+}

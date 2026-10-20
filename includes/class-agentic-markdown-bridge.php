@@ -20,6 +20,9 @@ final class Agentic_Markdown_Bridge {
 	const TITLE_MODE_META     = '_agentic_mb_title_mode';
 	const PRE_H1_MODE_META    = '_agentic_mb_pre_h1_mode';
 	const ENABLED_MODE_META   = '_agentic_mb_enabled_mode';
+	const FRONTEND_MODE_META  = '_agentic_mb_frontend_mode';
+	const COPY_MODE_META      = '_agentic_mb_copy_mode';
+	const LLMS_ACTION_MODE_META = '_agentic_mb_llms_action_mode';
 	const CUSTOM_MODE_META    = '_agentic_mb_custom_mode';
 	const CUSTOM_MARKDOWN_META = '_agentic_mb_custom_markdown';
 	const VIEW_COUNT_META     = '_agentic_mb_view_count';
@@ -37,7 +40,9 @@ final class Agentic_Markdown_Bridge {
 
 		// Rewrite/query hooks are unnecessary when both virtual resources are disabled.
 		if ( $markdown_enabled || $managed_llms ) {
-			add_action( 'init', array( __CLASS__, 'register_rewrites' ) );
+			// init() itself runs on the WordPress init hook, so rewrite rules can
+			// be registered immediately without scheduling another init callback.
+			self::register_rewrites();
 			add_filter( 'query_vars', array( __CLASS__, 'register_query_vars' ) );
 		}
 
@@ -49,10 +54,14 @@ final class Agentic_Markdown_Bridge {
 			add_action( 'template_redirect', array( __CLASS__, 'maybe_serve_markdown' ), -4 );
 			if ( ! empty( $settings['content_negotiation'] ) ) {
 				add_action( 'template_redirect', array( __CLASS__, 'maybe_serve_negotiated_markdown' ), -3 );
+				add_filter( 'wp_headers', array( __CLASS__, 'add_accept_vary_header' ) );
 			}
-			if ( ! empty( $settings['frontend_button'] ) ) {
-				add_action( 'wp_footer', array( __CLASS__, 'print_frontend_markdown_actions' ), 100 );
-			}
+
+			// Register the footer renderer only after the main query is known. This
+			// keeps normal requests lean while still allowing per-content overrides
+			// to enable actions when the global setting is off.
+			add_action( 'wp', array( __CLASS__, 'maybe_register_frontend_markdown_actions' ) );
+			add_action( 'wp_enqueue_scripts', array( __CLASS__, 'enqueue_frontend_markdown_action_assets' ) );
 		}
 
 		if ( ( $markdown_enabled && ! empty( $settings['alternate_link'] ) ) || ! empty( $settings['describedby_link'] ) || $managed_llms ) {
@@ -171,11 +180,11 @@ final class Agentic_Markdown_Bridge {
 			'x_robots'                   => 'none',
 			'analytics'                  => 0,
 			'frontend_button'            => 0,
-			'button_label'               => __( 'View Markdown', 'agentic-markdown-bridge' ),
+			'button_label'               => '',
 			'button_copy'                => 0,
-			'copy_label'                 => __( 'Copy Markdown', 'agentic-markdown-bridge' ),
+			'copy_label'                 => '',
 			'button_llms'                => 0,
-			'llms_button_label'          => __( 'View llms.txt', 'agentic-markdown-bridge' ),
+			'llms_button_label'          => '',
 			'button_position'            => 'bottom-center',
 			'button_style'               => 'dark',
 			'button_shape'               => 'pill',
@@ -231,10 +240,26 @@ final class Agentic_Markdown_Bridge {
 		return is_link( self::get_physical_llms_path() );
 	}
 
-	/** Local filesystem wrapper. */
+	/**
+	 * Whether WordPress can use direct filesystem access at the site root.
+	 *
+	 * Physical llms.txt editing is intentionally limited to direct access so the
+	 * plugin never requests or stores FTP/SSH credentials. The virtual manager
+	 * remains available when direct access is not supported.
+	 *
+	 * @return bool
+	 */
+	public static function physical_llms_direct_filesystem_available() {
+		require_once ABSPATH . 'wp-admin/includes/file.php';
+
+		return 'direct' === get_filesystem_method( array(), ABSPATH );
+	}
+
+	/** Local direct-filesystem wrapper used for safe root llms.txt access. */
 	private static function get_local_filesystem() {
 		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-base.php';
 		require_once ABSPATH . 'wp-admin/includes/class-wp-filesystem-direct.php';
+
 		return new WP_Filesystem_Direct( null );
 	}
 
@@ -295,7 +320,7 @@ final class Agentic_Markdown_Bridge {
 
 	/** Physical llms.txt writable status. */
 	public static function physical_llms_is_writable() {
-		if ( ! self::physical_llms_exists() || self::physical_llms_is_symlink() ) {
+		if ( ! self::physical_llms_exists() || self::physical_llms_is_symlink() || ! self::physical_llms_direct_filesystem_available() ) {
 			return false;
 		}
 		try {
@@ -320,6 +345,12 @@ final class Agentic_Markdown_Bridge {
 		}
 		if ( self::physical_llms_is_symlink() ) {
 			return new WP_Error( 'agentic_mb_llms_symlink', __( 'For safety, Agentic Markdown Bridge will not edit a symbolic-link llms.txt file.', 'agentic-markdown-bridge' ) );
+		}
+		if ( ! self::physical_llms_direct_filesystem_available() ) {
+			return new WP_Error(
+				'agentic_mb_llms_filesystem_method',
+				__( 'Physical llms.txt editing requires direct filesystem access. Use the WordPress-managed virtual llms.txt option on this host.', 'agentic-markdown-bridge' )
+			);
 		}
 		if ( strlen( (string) $content ) > 2 * MB_IN_BYTES ) {
 			return new WP_Error( 'agentic_mb_llms_too_large', __( 'llms.txt is larger than the 2 MB safety limit.', 'agentic-markdown-bridge' ) );
@@ -476,6 +507,63 @@ final class Agentic_Markdown_Bridge {
 			$enabled = in_array( $post->post_type, $allowed, true );
 		}
 		return (bool) apply_filters( 'agentic_markdown_bridge_is_enabled_for_post', $enabled, $post );
+	}
+
+
+	/** Get an inherit/enable/disable mode for a per-content front-end option. */
+	public static function get_post_toggle_mode( $post_id, $meta_key ) {
+		$allowed_meta = array( self::FRONTEND_MODE_META, self::COPY_MODE_META, self::LLMS_ACTION_MODE_META );
+		if ( ! in_array( $meta_key, $allowed_meta, true ) ) {
+			return 'inherit';
+		}
+		$mode = get_post_meta( (int) $post_id, $meta_key, true );
+		return in_array( $mode, array( 'enable', 'disable' ), true ) ? $mode : 'inherit';
+	}
+
+	/** Resolve a global front-end setting with an optional per-content override. */
+	private static function resolve_post_toggle( $post, $meta_key, $global_enabled ) {
+		$post = get_post( $post );
+		if ( ! $post instanceof WP_Post ) {
+			return (bool) $global_enabled;
+		}
+		$mode = self::get_post_toggle_mode( $post->ID, $meta_key );
+		if ( 'enable' === $mode ) {
+			return true;
+		}
+		if ( 'disable' === $mode ) {
+			return false;
+		}
+		return (bool) $global_enabled;
+	}
+
+	/** Whether the fixed front-end action group is enabled for a post. */
+	public static function is_frontend_actions_enabled( $post ) {
+		$post = get_post( $post );
+		if ( ! $post instanceof WP_Post || ! self::is_post_enabled( $post ) ) {
+			return false;
+		}
+		$enabled = self::resolve_post_toggle( $post, self::FRONTEND_MODE_META, ! empty( self::get_settings()['frontend_button'] ) );
+		return (bool) apply_filters( 'agentic_markdown_bridge_frontend_actions_enabled', $enabled, $post );
+	}
+
+	/** Whether Copy Markdown is enabled for a post. */
+	public static function is_copy_action_enabled( $post ) {
+		$post = get_post( $post );
+		if ( ! $post instanceof WP_Post ) {
+			return false;
+		}
+		$enabled = self::resolve_post_toggle( $post, self::COPY_MODE_META, ! empty( self::get_settings()['button_copy'] ) );
+		return (bool) apply_filters( 'agentic_markdown_bridge_copy_action_enabled', $enabled, $post );
+	}
+
+	/** Whether the llms.txt front-end action is enabled for a post. */
+	public static function is_llms_action_enabled( $post ) {
+		$post = get_post( $post );
+		if ( ! $post instanceof WP_Post ) {
+			return false;
+		}
+		$enabled = self::resolve_post_toggle( $post, self::LLMS_ACTION_MODE_META, ! empty( self::get_settings()['button_llms'] ) );
+		return (bool) apply_filters( 'agentic_markdown_bridge_llms_action_enabled', $enabled, $post );
 	}
 
 	/** Markdown URL for a post. */
@@ -681,16 +769,19 @@ final class Agentic_Markdown_Bridge {
 		$custom      = (string) get_post_meta( $post->ID, self::CUSTOM_MARKDOWN_META, true );
 		if ( 'custom' === $custom_mode ) {
 			$body = trim( $custom );
+			if ( $body && self::should_ignore_before_first_h1( $post ) ) {
+				$body = self::trim_before_first_h1( $body );
+			}
 		} else {
 			$title        = wp_strip_all_tags( get_the_title( $post ) );
 			$content_html = apply_filters( 'the_content', $post->post_content ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentional use of WordPress core's the_content filter to render post content consistently.
 			$content_html = (string) apply_filters( 'agentic_markdown_bridge_rendered_html', $content_html, $post );
 			self::ensure_converter_loaded();
-			$converted    = trim( Agentic_Markdown_Converter::convert( $content_html, get_permalink( $post ), self::get_exclusion_classes() ) );
+			$converted = trim( Agentic_Markdown_Converter::convert( $content_html, get_permalink( $post ), self::get_exclusion_classes() ) );
 			if ( $converted && self::should_ignore_before_first_h1( $post ) ) {
 				$converted = self::trim_before_first_h1( $converted );
 			}
-			$parts        = array();
+			$parts = array();
 			if ( $title && self::should_include_post_title( $post, $content_html, $converted ) ) {
 				$parts[] = '# ' . self::escape_heading_text( $title );
 			}
@@ -852,44 +943,125 @@ final class Agentic_Markdown_Bridge {
 		}
 	}
 
+
+	/**
+	 * Resolve the current front-end action state, or false when actions are hidden.
+	 *
+	 * @return array|false
+	 */
+	private static function get_frontend_action_state() {
+		if ( is_admin() || is_feed() || is_404() ) {
+			return false;
+		}
+
+		$settings = self::get_settings();
+		$post     = is_singular() ? get_queried_object() : null;
+
+		if ( $post instanceof WP_Post ) {
+			if ( ! self::is_frontend_actions_enabled( $post ) ) {
+				return false;
+			}
+			$show_copy = self::is_copy_action_enabled( $post );
+			$show_llms = self::is_llms_action_enabled( $post );
+		} else {
+			if ( ! ( is_front_page() && 'posts' === get_option( 'show_on_front' ) && ! empty( $settings['frontend_button'] ) ) ) {
+				return false;
+			}
+			$show_copy = ! empty( $settings['button_copy'] );
+			$show_llms = ! empty( $settings['button_llms'] );
+		}
+
+		return array(
+			'settings'  => $settings,
+			'post'      => $post,
+			'show_copy' => $show_copy,
+			'show_llms' => $show_llms,
+		);
+	}
+
+	/** Register front-end actions only when the current request needs them. */
+	public static function maybe_register_frontend_markdown_actions() {
+		if ( false === self::get_frontend_action_state() ) {
+			return;
+		}
+		add_action( 'wp_footer', array( __CLASS__, 'print_frontend_markdown_actions' ), 10 );
+	}
+
+	/** Enqueue front-end action CSS/JS through WordPress asset APIs. */
+	public static function enqueue_frontend_markdown_action_assets() {
+		$state = self::get_frontend_action_state();
+		if ( false === $state ) {
+			return;
+		}
+
+		$base_url = plugin_dir_url( AGENTIC_MB_PLUGIN_FILE ) . 'assets/';
+		wp_enqueue_style(
+			'agentic-markdown-bridge-frontend-actions',
+			$base_url . 'frontend-actions.css',
+			array(),
+			AGENTIC_MB_VERSION
+		);
+
+		if ( ! empty( $state['show_copy'] ) ) {
+			wp_enqueue_script(
+				'agentic-markdown-bridge-frontend-actions',
+				$base_url . 'frontend-actions.js',
+				array(),
+				AGENTIC_MB_VERSION,
+				true
+			);
+			wp_localize_script(
+				'agentic-markdown-bridge-frontend-actions',
+				'AgenticMarkdownFrontendActions',
+				array(
+					'copied'     => __( 'Copied!', 'agentic-markdown-bridge' ),
+					'copyFailed' => __( 'Copy failed', 'agentic-markdown-bridge' ),
+				)
+			);
+		}
+	}
+
 	/** Optional front-end Markdown actions. */
 	public static function print_frontend_markdown_actions() {
-		if ( is_admin() || is_feed() || is_404() ) {
+		$state = self::get_frontend_action_state();
+		if ( false === $state ) {
 			return;
 		}
-		$settings = self::get_settings();
-		if ( empty( $settings['frontend_button'] ) ) {
-			return;
-		}
-		$post = is_singular() ? get_queried_object() : null;
-		if ( $post && ! self::is_post_enabled( $post ) ) {
-			return;
-		}
-		if ( ! $post && ! ( is_front_page() && 'posts' === get_option( 'show_on_front' ) && ! empty( $settings['enabled'] ) ) ) {
-			return;
-		}
-		$markdown_url = $post ? self::get_markdown_url( $post ) : self::get_front_markdown_url();
-		$llms_url     = self::get_llms_txt_url();
+
+		$settings  = $state['settings'];
+		$post      = $state['post'];
+		$show_copy = ! empty( $state['show_copy'] );
+		$show_llms = ! empty( $state['show_llms'] );
+
+		$markdown_url = $post instanceof WP_Post ? self::get_markdown_url( $post ) : self::get_front_markdown_url();
+		$llms_url     = $show_llms ? self::get_llms_txt_url() : '';
 		$position     = in_array( $settings['button_position'], array( 'bottom-left', 'bottom-center', 'bottom-right' ), true ) ? $settings['button_position'] : 'bottom-center';
 		$style        = in_array( $settings['button_style'], array( 'dark', 'light', 'auto' ), true ) ? $settings['button_style'] : 'dark';
 		$shape        = in_array( $settings['button_shape'], array( 'pill', 'rounded', 'square' ), true ) ? $settings['button_shape'] : 'pill';
+		$button_label = trim( (string) $settings['button_label'] );
+		$copy_label   = trim( (string) $settings['copy_label'] );
+		$llms_label   = trim( (string) $settings['llms_button_label'] );
+
+		if ( '' === $button_label ) {
+			$button_label = __( 'View Markdown', 'agentic-markdown-bridge' );
+		}
+		if ( '' === $copy_label ) {
+			$copy_label = __( 'Copy Markdown', 'agentic-markdown-bridge' );
+		}
+		if ( '' === $llms_label ) {
+			$llms_label = __( 'View llms.txt', 'agentic-markdown-bridge' );
+		}
 		$classes      = 'agentic-mb-actions agentic-mb-' . $position . ' agentic-mb-style-' . $style . ' agentic-mb-shape-' . $shape;
 		?>
-		<style id="agentic-markdown-bridge-actions-css">
-		.agentic-mb-actions{position:fixed;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:99999;display:flex;gap:8px;align-items:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}.agentic-mb-bottom-center{left:50%;transform:translateX(-50%)}.agentic-mb-bottom-left{left:24px}.agentic-mb-bottom-right{right:24px}.agentic-mb-actions a,.agentic-mb-actions button{appearance:none;display:inline-flex;align-items:center;justify-content:center;gap:.45em;box-sizing:border-box;padding:11px 17px;border:1px solid rgba(127,127,127,.24);font-family:inherit;font-size:14px;font-weight:600;line-height:1.2;text-decoration:none!important;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.14);transition:transform .15s ease,box-shadow .15s ease}.agentic-mb-shape-pill a,.agentic-mb-shape-pill button{border-radius:999px}.agentic-mb-shape-rounded a,.agentic-mb-shape-rounded button{border-radius:10px}.agentic-mb-shape-square a,.agentic-mb-shape-square button{border-radius:0}.agentic-mb-style-dark a,.agentic-mb-style-dark button{background:#111;color:#fff!important}.agentic-mb-style-light a,.agentic-mb-style-light button{background:#fff;color:#111!important}.agentic-mb-actions a:hover,.agentic-mb-actions button:hover{transform:translateY(-1px);box-shadow:0 6px 18px rgba(0,0,0,.2)}.agentic-mb-actions a:focus-visible,.agentic-mb-actions button:focus-visible{outline:3px solid currentColor;outline-offset:3px}@media(prefers-color-scheme:dark){.agentic-mb-style-auto a,.agentic-mb-style-auto button{background:#111;color:#fff!important}}@media(prefers-color-scheme:light){.agentic-mb-style-auto a,.agentic-mb-style-auto button{background:#fff;color:#111!important}}@media(max-width:600px){.agentic-mb-actions{bottom:calc(14px + env(safe-area-inset-bottom,0px));max-width:calc(100vw - 24px);flex-wrap:wrap;justify-content:center}.agentic-mb-bottom-left{left:12px}.agentic-mb-bottom-right{right:12px}.agentic-mb-actions a,.agentic-mb-actions button{padding:10px 14px;font-size:13px}}
-		</style>
 		<div class="<?php echo esc_attr( $classes ); ?>" data-markdown-url="<?php echo esc_url( $markdown_url ); ?>">
-			<a href="<?php echo esc_url( $markdown_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( (string) $settings['button_label'] ); ?> ↗</a>
-			<?php if ( ! empty( $settings['button_copy'] ) ) : ?>
-				<button type="button" class="agentic-mb-copy"><?php echo esc_html( (string) $settings['copy_label'] ); ?></button>
+			<a href="<?php echo esc_url( $markdown_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $button_label ); ?> ↗</a>
+			<?php if ( $show_copy ) : ?>
+				<button type="button" class="agentic-mb-copy"><?php echo esc_html( $copy_label ); ?></button>
 			<?php endif; ?>
-			<?php if ( ! empty( $settings['button_llms'] ) && $llms_url ) : ?>
-				<a href="<?php echo esc_url( $llms_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( (string) $settings['llms_button_label'] ); ?> ↗</a>
+			<?php if ( $show_llms && $llms_url ) : ?>
+				<a href="<?php echo esc_url( $llms_url ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $llms_label ); ?> ↗</a>
 			<?php endif; ?>
 		</div>
-		<?php if ( ! empty( $settings['button_copy'] ) ) : ?>
-		<script id="agentic-markdown-bridge-copy-js">(function(){'use strict';var b=document.querySelector('.agentic-mb-copy'),w=document.querySelector('.agentic-mb-actions');if(!b||!w)return;var original=b.textContent;b.addEventListener('click',function(){fetch(w.getAttribute('data-markdown-url'),{credentials:'same-origin',headers:{'Accept':'text/markdown'}}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.text();}).then(function(t){return navigator.clipboard.writeText(t);}).then(function(){b.textContent=<?php echo wp_json_encode( __( 'Copied!', 'agentic-markdown-bridge' ) ); ?>;setTimeout(function(){b.textContent=original;},1600);}).catch(function(){b.textContent=<?php echo wp_json_encode( __( 'Copy failed', 'agentic-markdown-bridge' ) ); ?>;setTimeout(function(){b.textContent=original;},1600);});});}());</script>
-		<?php endif; ?>
 		<?php
 	}
 
@@ -905,7 +1077,9 @@ final class Agentic_Markdown_Bridge {
 		}
 		$method = self::request_method();
 		if ( ! in_array( $method, array( 'GET', 'HEAD' ), true ) ) {
-			status_header( 405 ); header( 'Allow: GET, HEAD' ); exit;
+			status_header( 405 );
+			header( 'Allow: GET, HEAD' );
+			exit;
 		}
 		$physical = self::read_physical_llms_content();
 		$content  = false !== $physical ? trim( (string) $physical ) : trim( (string) $settings['llms_content'] );
@@ -935,7 +1109,9 @@ final class Agentic_Markdown_Bridge {
 		}
 		$method = self::request_method();
 		if ( ! in_array( $method, array( 'GET', 'HEAD' ), true ) ) {
-			status_header( 405 ); header( 'Allow: GET, HEAD' ); exit;
+			status_header( 405 );
+			header( 'Allow: GET, HEAD' );
+			exit;
 		}
 		if ( '__front__' === $requested_path && ! (int) get_option( 'page_on_front' ) && 'posts' === get_option( 'show_on_front' ) ) {
 			if ( empty( self::get_settings()['enabled'] ) ) {
@@ -949,6 +1125,38 @@ final class Agentic_Markdown_Bridge {
 			self::serve_404();
 		}
 		self::send_markdown_response( self::build_markdown( $post ), $post, get_permalink( $post ), get_post_modified_time( 'U', true, $post ), $method );
+	}
+
+	/**
+	 * Ensure caches vary eligible canonical HTML responses by the Accept header.
+	 *
+	 * @param array $headers Response headers.
+	 * @return array
+	 */
+	public static function add_accept_vary_header( $headers ) {
+		if ( is_admin() || is_feed() || is_404() ) {
+			return $headers;
+		}
+
+		$eligible = false;
+		if ( is_singular() ) {
+			$eligible = self::is_post_enabled( get_queried_object() );
+		} elseif ( is_front_page() && 'posts' === get_option( 'show_on_front' ) && ! empty( self::get_settings()['enabled'] ) ) {
+			$eligible = true;
+		}
+
+		if ( ! $eligible ) {
+			return $headers;
+		}
+
+		$vary       = isset( $headers['Vary'] ) ? array_map( 'trim', explode( ',', (string) $headers['Vary'] ) ) : array();
+		$vary_lower = array_map( 'strtolower', $vary );
+		if ( ! in_array( 'accept', $vary_lower, true ) ) {
+			$vary[] = 'Accept';
+		}
+		$headers['Vary'] = implode( ', ', array_filter( $vary ) );
+
+		return $headers;
 	}
 
 	/** Serve Markdown when Accept: text/markdown is preferred. */
