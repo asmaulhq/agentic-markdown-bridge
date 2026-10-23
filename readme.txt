@@ -3,7 +3,7 @@ Contributors: asmaulhq
 Tags: markdown, ai agents, machine readable, content negotiation, llms
 Requires at least: 6.0
 Tested up to: 7.1
-Stable tag: 1.0.3
+Stable tag: 1.0.4
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -228,6 +228,9 @@ These services are third-party services and are governed by their own terms and 
 Agentic Markdown Bridge does not contact AI services automatically and does not transmit site data to Bipixels. Optional local counters are stored only in the site's own WordPress database and contain aggregate counts only. If an administrator explicitly uses an AI-assisted llms.txt button, the generated prompt is handled as described in the External Services section above.
 
 == Changelog ==
+
+= 1.0.4 =
+* Fixed dynamic Gutenberg post-context blocks, including Featured Image, so Markdown renders data from the requested post or page instead of an unrelated global post.
 
 = 1.0.3 =
 * Kept default front-end action labels translation-free in stored settings and resolve translated fallbacks only when rendering, avoiding early translation loading and locale-specific persisted defaults.
