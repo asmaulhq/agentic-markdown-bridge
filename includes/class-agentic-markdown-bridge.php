@@ -713,6 +713,28 @@ final class Agentic_Markdown_Bridge {
 	}
 
 	/**
+	 * Render post content with the requested post as the active block context.
+	 *
+	 * Dynamic post-context blocks such as core/post-featured-image read the
+	 * global post while WordPress renders blocks. Markdown requests can target a
+	 * post that is different from the request's existing global post, so set the
+	 * target post temporarily and always restore the previous value afterward.
+	 *
+	 * @param WP_Post $post Post being rendered.
+	 * @return string
+	 */
+	private static function render_post_content( $post ) {
+		$previous_post   = isset( $GLOBALS['post'] ) ? $GLOBALS['post'] : null;
+		$GLOBALS['post'] = $post;
+
+		try {
+			return (string) apply_filters( 'the_content', $post->post_content ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentional use of WordPress core's the_content filter to render post content consistently.
+		} finally {
+			$GLOBALS['post'] = $previous_post;
+		}
+	}
+
+	/**
 	 * Custom CSS classes that should be omitted from generated Markdown.
 	 *
 	 * The built-in agentic-markdown-exclude class is handled by the converter
@@ -774,7 +796,7 @@ final class Agentic_Markdown_Bridge {
 			}
 		} else {
 			$title        = wp_strip_all_tags( get_the_title( $post ) );
-			$content_html = apply_filters( 'the_content', $post->post_content ); // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Intentional use of WordPress core's the_content filter to render post content consistently.
+			$content_html = self::render_post_content( $post );
 			$content_html = (string) apply_filters( 'agentic_markdown_bridge_rendered_html', $content_html, $post );
 			self::ensure_converter_loaded();
 			$converted = trim( Agentic_Markdown_Converter::convert( $content_html, get_permalink( $post ), self::get_exclusion_classes() ) );
